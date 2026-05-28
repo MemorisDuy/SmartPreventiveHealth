@@ -750,14 +750,54 @@ def get_history(user_id: int):
 
         cursor.execute(
             """
+            SELECT record_id, HighBP, HighChol, BMI, Smoker, Diabetes,
+                   PhysActivity, Fruits, Veggies, HvyAlcoholConsump,
+                   Age, Sex, risk_percentage, risk_level, is_anomaly, created_at
+            FROM health_records
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            (user_id,)
+        )
+
+        records = cursor.fetchall()
+
+        # Convert datetime to string
+        for record in records:
+            if isinstance(record.get("created_at"), datetime):
+                record["created_at"] = record["created_at"].isoformat()
+
+        return list(reversed(records))
+
+    except Exception as e:
+        print(f"[ERROR] History error: {e}")
+        raise HTTPException(status_code=500, detail=f"Lỗi lấy lịch sử: {str(e)}")
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+# ============================================================================
+# ENDPOINT: POST /api/analyze-video-speech - Phân tích giọng nói từ video
+# ============================================================================
+@app.post("/api/analyze-video-speech")
+async def analyze_video_speech(file: UploadFile = File(...)):
+    """Phân tích giọng nói từ video bằng Gemini."""
+    require_gemini()
+
+    temp_filename = f"{uuid.uuid4()}.webm"
+    temp_path = os.path.join(tempfile.gettempdir(), temp_filename)
+
+    try:
         content = await file.read()
         with open(temp_path, "wb") as f:
             f.write(content)
-            
+
         # Upload file lên Gemini
         print(f"[FAST] Đang upload video lên Gemini để phân tích giọng nói: {temp_filename}")
         gemini_file = genai.upload_file(path=temp_path)
-        
+
         # Gọi mô hình với video file
         prompt = (
             "Bạn là một chuyên gia nhận diện giọng nói. Hãy nghe đoạn âm thanh trong video này và "
@@ -765,19 +805,19 @@ def get_history(user_id: int):
             "Nếu bạn không nghe thấy bất kỳ tiếng người nào, hãy trả về chữ 'EMPTY'. "
             "Chỉ trả về câu nói, không giải thích gì thêm."
         )
-        
+
         response = gemini_model.generate_content([gemini_file, prompt])
         transcript = response.text.strip()
-        
+
         # Cleanup file trên máy chủ Gemini
         genai.delete_file(gemini_file.name)
-        
+
         if transcript.upper() == "EMPTY":
             transcript = ""
-            
+
         print(f"[FAST] Gemini Speech Transcript: {transcript}")
         return {"transcript": transcript}
-        
+
     except Exception as e:
         print(f"[ERROR] Analyze Video Speech error: {e}")
         raise HTTPException(status_code=500, detail=f"Lỗi AI phân tích giọng nói: {str(e)}")
