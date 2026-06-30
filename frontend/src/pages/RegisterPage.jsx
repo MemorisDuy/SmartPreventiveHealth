@@ -4,6 +4,18 @@ import api from '../api/axios'
 import PublicHeader from '../components/PublicHeader'
 import Footer from '../components/Footer'
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Trang này xử lý đăng ký tài khoản mới.
+  Input X: họ tên, email, mật khẩu và xác nhận mật khẩu.
+  Hàm xử lý f:
+  - Frontend kiểm tra dữ liệu cơ bản như mật khẩu khớp hay chưa.
+  - Backend /api/register kiểm tra email đã tồn tại chưa và hash mật khẩu bằng bcrypt.
+  Output y: tài khoản user mới trong database.
+  Khi thầy hỏi bảo mật:
+  - Mật khẩu không lưu dạng chữ thường, mà được mã hóa hash trước khi lưu.
+*/
+
 const BENEFITS = [
   { title: 'Bảo mật tuyệt đối', desc: 'Dữ liệu sức khỏe được bảo vệ an toàn.' },
   { title: 'Đăng ký nhanh', desc: 'Chỉ mất một phút để bắt đầu sử dụng.' },

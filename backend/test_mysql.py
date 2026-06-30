@@ -15,7 +15,7 @@ for config in configs:
             password=config['password'],
             database='smartpreventivehealth'
         )
-        print(f"✓ Thành công! {config['desc']}")
+        print(f"[OK] Thanh cong! {config['desc']}")
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users LIMIT 1")
         result = cursor.fetchone()
@@ -23,4 +23,4 @@ for config in configs:
         conn.close()
         break
     except mysql.connector.Error as e:
-        print(f"✗ Thất bại - {config['desc']}: {e.msg}")
+        print(f"[FAIL] That bai - {config['desc']}: {e.msg}")

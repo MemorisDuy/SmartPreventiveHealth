@@ -48,14 +48,14 @@ switch ($choice) {
         
         # Khoi dong Backend trong tab moi
         Write-Host "[*] Khoi dong Backend..."
-        Start-Process powershell -ArgumentList "-NoExit -Command `"cd '$scriptPath'; & '.\start_backend.ps1'`""
+        Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -Command `"cd '$scriptPath'; & '.\start_backend.ps1'`""
         
         # Cho 5 giay de Backend khoi dong
         Start-Sleep -Seconds 5
         
         # Khoi dong Frontend trong tab moi
         Write-Host "[*] Khoi dong Frontend..."
-        Start-Process powershell -ArgumentList "-NoExit -Command `"cd '$scriptPath'; & '.\start_frontend.ps1'`""
+        Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -Command `"cd '$scriptPath'; & '.\start_frontend.ps1'`""
         
         Write-Host ""
         Write-Host "[+] He thong dang khoi dong..."

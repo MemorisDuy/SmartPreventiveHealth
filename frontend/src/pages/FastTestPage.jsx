@@ -1,6 +1,17 @@
 import React from 'react'
 import FASTTestComponent from '../components/FASTTestComponent'
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  File này là page wrapper cho FASTTestComponent.
+  Vai trò:
+  - Route /fast-test sẽ render component FAST chính.
+  - Logic AI không nằm ở file này mà nằm trong FASTTestComponent.jsx.
+  Khi thầy hỏi code FAST nằm đâu:
+  - File này chỉ bọc trang.
+  - Phần xử lý Face, Arms, Speech, Time/SOS và Heart Rate nằm ở components/FASTTestComponent.jsx.
+*/
+
 /**
  * FastTestPage - Wrapper cho FAST Test Component
  * 

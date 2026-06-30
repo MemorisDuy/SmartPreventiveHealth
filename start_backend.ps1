@@ -13,15 +13,23 @@ Write-Host ""
 
 # Kiem tra Python
 Write-Host "[*] Kiem tra Python..."
-$pythonCheck = python --version 2>&1
-Write-Host "[v] $pythonCheck"
-Write-Host ""
-
-# Kich hoat Virtual Environment
-Write-Host "[*] Kich hoat Virtual Environment..."
-if (Test-Path "venv\Scripts\Activate.ps1") {
-    & "venv\Scripts\Activate.ps1"
-    Write-Host "[v] Virtual Environment da kich hoat"
+$venvPython = Join-Path (Get-Location) "venv\Scripts\python.exe"
+if (Test-Path $venvPython) {
+    $pythonCheck = & $venvPython --version 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[x] Python trong backend\venv dang bi loi:"
+        Write-Host "    $pythonCheck"
+        Write-Host ""
+        Write-Host "Cach sua backend:"
+        Write-Host "  1. Cai Python tu https://www.python.org/downloads/"
+        Write-Host "  2. Xoa backend\venv cu"
+        Write-Host "  3. Chay: python -m venv backend\venv"
+        Write-Host "  4. Chay: backend\venv\Scripts\python.exe -m pip install -r backend\requirements.txt"
+        Write-Host ""
+        Write-Host "Frontend van co the chay rieng bang lua chon 2 trong startup.ps1."
+        exit 1
+    }
+    Write-Host "[v] $pythonCheck"
 } else {
     Write-Host "[!] Virtual Environment khong tim thay"
     Write-Host "   Tao venv: python -m venv venv"
@@ -60,7 +68,7 @@ if (Test-Path "heart_risk_model.pkl") {
     $response = Read-Host
     if ($response -eq "y" -or $response -eq "Y") {
         Write-Host "[*] Dang huan luyen model..."
-        python train_model.py
+        & $venvPython train_model.py
     }
 }
 Write-Host ""
@@ -76,4 +84,4 @@ Write-Host ""
 Write-Host "Nhan Ctrl+C de dung server"
 Write-Host ""
 
-uvicorn main:app --reload
+& $venvPython -m uvicorn main:app --reload

@@ -1,6 +1,16 @@
 import React from 'react'
 import { FEATURE_LABELS } from '../data/features'
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Component này hiển thị phần giải thích nhanh dựa trên kết quả dự đoán.
+  Input X: result từ API /api/predict, đặc biệt là feature_importances và is_anomaly.
+  Hàm xử lý f: sắp xếp các đặc trưng theo độ quan trọng giảm dần và đổi tên kỹ thuật sang tiếng Việt.
+  Output y: danh sách yếu tố ảnh hưởng nổi bật và cảnh báo nếu dữ liệu là anomaly.
+  Ý nghĩa:
+  - Giúp người dùng hiểu lý do phía sau kết quả, thay vì chỉ thấy một con số nguy cơ.
+*/
+
 export function XAI_Mock({ result }) {
   if (!result) return null
 

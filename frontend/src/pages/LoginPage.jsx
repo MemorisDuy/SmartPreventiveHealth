@@ -4,6 +4,18 @@ import api from '../api/axios'
 import PublicHeader from '../components/PublicHeader'
 import Footer from '../components/Footer'
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Trang này xử lý đăng nhập người dùng.
+  Input X: email và mật khẩu.
+  Hàm xử lý f: frontend gửi dữ liệu đến /api/login; backend kiểm tra email,
+  dùng bcrypt để so khớp mật khẩu đã hash trong database.
+  Output y: thông tin user đăng nhập thành công, sau đó lưu vào localStorage.
+  Ý nghĩa:
+  - Định danh người dùng để lưu lịch sử tầm soát, lịch sử chat và các thao tác cá nhân.
+  - Đây là module bảo mật/nền tảng, không phải module AI.
+*/
+
 export default function LoginPage() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -40,7 +52,7 @@ export default function LoginPage() {
     } catch (err) {
       if (!err.response) {
         setError(
-          'Không kết nối được máy chủ. Hãy mở terminal backend và chạy: uvicorn main:app --reload --port 5000'
+          'Không kết nối được máy chủ. Hãy mở terminal backend và chạy: cd backend && uvicorn main:app --reload'
         )
       } else {
         setError(

@@ -10,7 +10,18 @@ import {
   ResponsiveContainer
 } from 'recharts'
 
-export default function XAIChart({ xaiData: propXaiData }) {
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Component này vẽ biểu đồ XAI/feature importance.
+  Input X: dữ liệu xaiData gồm tên đặc trưng và giá trị ảnh hưởng.
+  Hàm xử lý f: chuẩn hóa dữ liệu đầu vào rồi dùng Recharts để biểu diễn bằng biểu đồ cột.
+  Output y: biểu đồ trực quan cho biết yếu tố nào tác động mạnh hơn đến kết quả dự đoán.
+  Khi thầy hỏi XAI lấy từ đâu:
+  - Backend trả feature_importances từ Random Forest.
+  - Component này chỉ chịu trách nhiệm hiển thị phần giải thích đó trên giao diện.
+*/
+
+export default function XAIChart({ xaiData: propXaiData, compact = false }) {
   // Sử dụng dữ liệu từ props nếu có, nếu không dùng mock data
   let chartData = propXaiData || []
 
@@ -50,9 +61,9 @@ export default function XAIChart({ xaiData: propXaiData }) {
       const data = payload[0].payload
       const label = data.type === 'danger' ? '⬆️ TĂNG nguy cơ' : '⬇️ GIẢM nguy cơ'
       return (
-        <div className="bg-white border-2 border-slate-300 rounded-lg shadow-lg p-4">
-          <p className="font-bold text-slate-900 text-sm">{data.name}</p>
-          <p className={`font-bold text-base ${data.type === 'danger' ? 'text-red-600' : 'text-green-600'}`}>
+        <div className="bg-white border-2 border-slate-200 rounded-lg shadow-md p-3">
+          <p className="font-bold text-slate-800 text-xs">{data.name}</p>
+          <p className={`font-bold text-sm ${data.type === 'danger' ? 'text-red-600' : 'text-green-600'}`}>
             {Math.abs(data.value)}% - {label}
           </p>
         </div>
@@ -67,19 +78,64 @@ export default function XAIChart({ xaiData: propXaiData }) {
     const isNegative = value < 0
 
     // Vị trí label ở bên ngoài cột
-    const labelX = isNegative ? x - 35 : x + width + 8
+    const labelX = isNegative ? x - (compact ? 28 : 35) : x + width + 8
 
     return (
       <text
         x={labelX}
         y={y + 12}
         fill={value > 0 ? '#dc2626' : '#16a34a'}
-        fontSize={13}
+        fontSize={compact ? 10 : 13}
         fontWeight={700}
         textAnchor={isNegative ? 'end' : 'start'}
       >
         {`${Math.abs(value)}%`}
       </text>
+    )
+  }
+
+  if (compact) {
+    return (
+      <div className="w-full">
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart
+            data={xaiData}
+            layout="vertical"
+            margin={{ top: 5, right: 35, left: 80, bottom: 5 }}
+          >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              stroke="#f1f5f9"
+              vertical={false}
+              horizontal={true}
+            />
+            <YAxis
+              type="category"
+              dataKey="name"
+              width={75}
+              tick={{ fontSize: 10, fill: '#475569', fontWeight: 500 }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <XAxis
+              type="number"
+              hide={true}
+              domain={[-20, 30]}
+            />
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(22, 163, 74, 0.05)' }} />
+            <Bar
+              dataKey="value"
+              radius={[0, 4, 4, 0]}
+              label={renderCustomLabel}
+              isAnimationActive={true}
+            >
+              {xaiData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={getBarColor(entry.value)} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     )
   }
 
@@ -91,7 +147,7 @@ export default function XAIChart({ xaiData: propXaiData }) {
         {/* Header Section */}
         <div className="bg-gradient-to-r from-slate-50 to-slate-100 px-8 py-6 border-b border-slate-200">
           <div className="flex items-center gap-3 mb-2">
-            <span className="text-3xl">�</span>
+            <span className="text-3xl"></span>
             <h3 className="text-2xl font-bold text-slate-900">
               Explainable AI (XAI)
             </h3>

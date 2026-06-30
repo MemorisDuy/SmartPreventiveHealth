@@ -14,7 +14,7 @@ Write-Host ""
 # Kiem tra Node.js
 Write-Host "[*] Kiem tra Node.js..."
 $nodeCheck = node --version 2>&1
-$npmCheck = npm --version 2>&1
+$npmCheck = npm.cmd --version 2>&1
 Write-Host "[v] Node.js: $nodeCheck"
 Write-Host "[v] npm: $npmCheck"
 Write-Host ""
@@ -28,7 +28,7 @@ if (Test-Path "node_modules") {
     Write-Host "   Cai dat: npm install"
     Write-Host ""
     Write-Host "[*] Dang cai dat dependencies..."
-    npm install
+    npm.cmd install
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[x] Loi cai dat dependencies"
         exit 1
@@ -49,4 +49,4 @@ Write-Host ""
 Write-Host "Nhan Ctrl+C de dung server"
 Write-Host ""
 
-npm run dev
+npm.cmd run dev -- --host 127.0.0.1 --port 5173

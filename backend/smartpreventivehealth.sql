@@ -35,11 +35,12 @@ CREATE TABLE health_records (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Bảng chat_logs: lưu lịch sử chat với bác sĩ AI
-CREATE TABLE chat_logs (
-    chat_id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    user_message TEXT,
-    ai_response TEXT,
+CREATE TABLE `chat_logs` (
+  `chat_id` int(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `session_id` varchar(50) DEFAULT NULL,
+  `user_id` int(11) NOT NULL,
+  `user_message` text NOT NULL,
+  `ai_response` text NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
     INDEX idx_user_date (user_id, created_at)

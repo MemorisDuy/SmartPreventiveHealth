@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
 import api from '../api/axios';
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Component này lấy lời khuyên AI sau khi có kết quả tầm soát.
+  Input X: riskPercentage và healthData của người dùng.
+  Hàm xử lý f:
+  - Ưu tiên gọi backend /api/health-advice để backend dùng Gemini/Groq tạo lời khuyên.
+  - Nếu cần, có cơ chế gọi Groq trực tiếp theo cấu hình môi trường.
+  Output y: các lời khuyên hành động ngắn gọn, phù hợp với mức nguy cơ và chỉ số sức khỏe.
+  Lưu ý:
+  - Đây là lời khuyên tham khảo, không phải chẩn đoán thay bác sĩ.
+*/
+
 const SYSTEM_PROMPT =
   'Bạn là một bác sĩ tim mạch giàu kinh nghiệm. Hãy đưa ra chính xác 3 gạch đầu dòng lời khuyên hành động ngắn gọn, thiết thực, ấm áp bằng tiếng Việt dựa vào dữ liệu sức khỏe của bệnh nhân. Không sử dụng markdown in đậm, in nghiêng hoặc ký tự đặc biệt.';
 

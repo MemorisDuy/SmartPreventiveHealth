@@ -2,6 +2,17 @@ import React, { useState } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Navbar là thanh điều hướng chính sau khi người dùng đăng nhập.
+  Vai trò:
+  - Liệt kê các route chính: Dashboard, Tầm soát, Tư vấn AI, Dinh dưỡng,
+    Giám sát, Lịch sử, FAST Test và SOS.
+  - Cho phép đăng xuất bằng cách xóa user khỏi localStorage.
+  Khi thầy hỏi web có những module nào:
+  - Có thể nhìn vào danh sách navItems trong file này để nêu đủ các tính năng đang mở.
+*/
+
 export default function Navbar() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -24,9 +35,9 @@ export default function Navbar() {
     { path: '/risk-assessment', label: 'Tầm soát' },
     { path: '/chat', label: 'Tư vấn AI' },
     { path: '/diet-analyzer', label: 'Dinh dưỡng' },
-    { path: '/smart-surveillance', label: 'Giám sát' },
+    { path: '/smart-surveillance', label: 'Giám sát', badge: 'AI' },
     { path: '/history', label: 'Lịch sử' },
-    { path: '/fast-test', label: 'F.A.S.T Test' },
+    { path: '/fast-test', label: 'F.A.S.T Test', badge: 'PRO' },
     { path: '/sos-map', label: 'SOS' },
   ]
 
@@ -36,7 +47,7 @@ export default function Navbar() {
       : 'text-slate-600 hover:text-brand-700 hover:bg-slate-50'
 
   return (
-    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
+    <header className="sticky top-0 z-[1010] bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 sm:h-[72px] gap-3">
           
@@ -54,18 +65,23 @@ export default function Navbar() {
           </Link>
 
           {/* Menu - CENTER (9 items spread) */}
-          <nav className="hidden xl:flex items-center flex-1 gap-0 px-3">
+          <nav className="hidden xl:flex items-center flex-1 gap-0.5 px-2">
             {navItems.map((item) => (
               <Link
                 key={item.path + item.label}
                 to={item.path}
-                className={`px-2 py-2 rounded-md text-xs font-semibold whitespace-nowrap transition-colors flex-1 text-center leading-tight ${
-                  item.sub
-                    ? 'text-slate-600 hover:text-brand-700 hover:bg-slate-50'
-                    : linkClass(isActive(item.path))
+                className={`px-1 py-2 xl:px-2 rounded-lg text-[11px] xl:text-xs font-semibold whitespace-nowrap transition-colors flex-1 text-center leading-tight flex items-center justify-center gap-1 relative ${
+                  linkClass(isActive(item.path))
                 }`}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {item.badge && (
+                  <span className={`px-1 py-0.5 text-[8px] font-black text-white rounded-md leading-none shadow-sm shrink-0 ${
+                    item.badge === 'AI' ? 'bg-cyan-500' : 'bg-purple-600'
+                  }`}>
+                    {item.badge}
+                  </span>
+                )}
               </Link>
             ))}
           </nav>
@@ -104,11 +120,18 @@ export default function Navbar() {
                 key={item.path + item.label}
                 to={item.path}
                 onClick={() => setMenuOpen(false)}
-                className={`${item.sub ? 'px-8 py-2 text-sm' : 'px-4 py-3'} rounded-xl font-semibold transition-colors ${linkClass(
+                className={`${item.sub ? 'px-8 py-2 text-sm' : 'px-4 py-3'} rounded-xl font-semibold transition-colors flex items-center justify-between ${linkClass(
                   isActive(item.path)
                 )}`}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {item.badge && (
+                  <span className={`px-2 py-0.5 text-[9px] font-black text-white rounded-full leading-none ${
+                    item.badge === 'AI' ? 'bg-cyan-500' : 'bg-purple-600'
+                  }`}>
+                    {item.badge}
+                  </span>
+                )}
               </Link>
             ))}
             <button

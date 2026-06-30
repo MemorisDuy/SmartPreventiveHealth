@@ -1,3 +1,16 @@
+# GHI CHÚ VẤN ĐÁP:
+# File này dùng để huấn luyện mô hình học máy chính của dự án.
+# Dữ liệu đầu vào là bộ BRFSS 2015, trong đó:
+# - X là 11 đặc trưng sức khỏe: huyết áp, cholesterol, BMI, hút thuốc,
+#   tiểu đường, vận động, ăn trái cây, ăn rau, uống rượu nhiều, tuổi và giới tính.
+# - y là cột target HeartDiseaseorAttack, biểu diễn có/không liên quan bệnh tim hoặc đột quỵ.
+# Thuật toán chính:
+# - RandomForestClassifier: học có giám sát, dùng để dự đoán xác suất nguy cơ.
+# - IsolationForest: học không giám sát, dùng để phát hiện bộ chỉ số bất thường.
+# Output của file này là 2 file model .pkl:
+# - heart_risk_model.pkl cho Random Forest.
+# - anomaly_detector.pkl cho Isolation Forest.
+
 # Train Model Script - Huấn luyện mô hình Random Forest
 # Dữ liệu: BRFSS 2015 từ CDC Mỹ
 # Target: HeartDiseaseorAttack (Rủi ro Tim mạch & Đột quỵ)

@@ -14,6 +14,18 @@ import PageHeader from '../components/PageHeader'
 import FeaturePageBanner from '../components/FeaturePageBanner'
 import { getFeatureById } from '../data/features'
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Trang này hiển thị lịch sử tầm soát sức khỏe của từng người dùng.
+  Input X: user_id của người dùng đang đăng nhập.
+  Hàm xử lý f: gọi API /api/history/{user_id}, backend query bảng health_records trong MySQL.
+  Output y: danh sách các lần tầm soát gần nhất, gồm input sức khỏe, phần trăm nguy cơ,
+  mức nguy cơ và trạng thái bất thường.
+  Ý nghĩa:
+  - Giúp người dùng theo dõi xu hướng sức khỏe theo thời gian.
+  - Chứng minh hệ thống có lưu trữ dữ liệu sau mỗi lần dự đoán, không chỉ xử lý tức thời.
+*/
+
 export default function HistoryPage() {
   const userStr = localStorage.getItem('user')
   const user = userStr ? JSON.parse(userStr) : {}
