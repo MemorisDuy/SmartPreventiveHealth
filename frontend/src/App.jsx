@@ -18,6 +18,19 @@ import ErrorBoundary from './components/ErrorBoundary'
 import { SurveillanceProvider } from './context/SurveillanceContext'
 import 'regenerator-runtime/runtime'
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  File này là điểm điều phối route chính của frontend React.
+  Vai trò:
+  - Khai báo các trang public: Trang chủ, Đăng nhập, Đăng ký.
+  - Khai báo các trang cần đăng nhập: Dashboard, Tầm soát, XAI, FAST,
+    Tư vấn AI, SOS, Dinh dưỡng, Giám sát AI và Lịch sử.
+  - ProtectedRoute kiểm tra localStorage có user hay chưa; nếu chưa có thì chuyển về /login.
+  Khi thầy hỏi luồng frontend:
+  - Người dùng đăng nhập xong, frontend lưu user vào localStorage.
+  - Các trang chức năng được bảo vệ bằng ProtectedRoute để gắn kết dữ liệu theo từng user.
+*/
+
 function ProtectedRoute({ children }) {
   const user = localStorage.getItem('user')
   return user ? children : <Navigate to="/login" replace />

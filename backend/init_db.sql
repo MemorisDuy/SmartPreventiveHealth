@@ -32,6 +32,7 @@ CREATE TABLE health_records (
 
 CREATE TABLE chat_logs (
   chat_id INT PRIMARY KEY AUTO_INCREMENT,
+  session_id VARCHAR(50),
   user_id INT NOT NULL,
   user_message TEXT NOT NULL,
   ai_response TEXT NOT NULL,

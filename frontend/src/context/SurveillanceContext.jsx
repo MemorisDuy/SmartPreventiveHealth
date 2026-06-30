@@ -1,5 +1,16 @@
 import React, { createContext, useContext, useState } from 'react';
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Context này lưu trạng thái dùng chung cho module giám sát và FAST.
+  Input X: các trạng thái sinh ra trong quá trình camera xử lý như alertTriggered,
+  alertType, emergencyAdvice và stats.
+  Hàm xử lý f: React Context truyền state xuống các component con mà không cần truyền props nhiều tầng.
+  Output y: các component khác có thể đọc/cập nhật trạng thái cảnh báo thống nhất.
+  Khi thầy hỏi vì sao dùng Context:
+  - Vì trạng thái giám sát là dữ liệu dùng chung giữa nhiều component, nên Context giúp quản lý tập trung.
+*/
+
 const SurveillanceContext = createContext();
 
 export const useSurveillance = () => useContext(SurveillanceContext);

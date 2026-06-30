@@ -1,3 +1,15 @@
+/*
+  GHI CHÚ VẤN ĐÁP:
+  File này định nghĩa danh mục tính năng hiển thị trên Dashboard và Trang chủ.
+  Vai trò:
+  - FEATURE_LABELS ánh xạ tên đặc trưng kỹ thuật sang nhãn tiếng Việt dễ hiểu.
+  - APP_FEATURES mô tả các module của hệ thống: tầm soát ML, tư vấn AI,
+    phân tích dinh dưỡng, lịch sử, SOS, XAI, FAST và anomaly detection.
+  - CORE_FEATURES và ADVANCED_FEATURES chia nhóm tính năng để giao diện trình bày rõ hơn.
+  Khi thầy hỏi hệ thống có những chức năng nào:
+  - Có thể dựa vào file này để trình bày đầy đủ các module chính của web.
+*/
+
 /** Danh mục 8 tính năng — đồng bộ đặc tả đồ án */
 export const FEATURE_LABELS = {
   HighBP: 'Huyết áp cao',

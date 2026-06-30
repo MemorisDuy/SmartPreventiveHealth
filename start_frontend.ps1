@@ -1,52 +1,52 @@
-# Script khởi động Frontend Smart Healthcare Platform
+# Script khoi dong Frontend Smart Healthcare Platform
 
 Write-Host "======================================"
-Write-Host "🚀 Khởi Động Frontend Server"
+Write-Host "[*] Khoi Dong Frontend Server"
 Write-Host "======================================"
 Write-Host ""
 
-# Đi vào thư mục frontend
+# Di vao thu muc frontend
 Set-Location "$PSScriptRoot\frontend"
 
-Write-Host "📁 Thư mục hiện tại: $(Get-Location)"
+Write-Host "[+] Thu muc hien tai: $(Get-Location)"
 Write-Host ""
 
-# Kiểm tra Node.js
-Write-Host "🔍 Kiểm tra Node.js..."
+# Kiem tra Node.js
+Write-Host "[*] Kiem tra Node.js..."
 $nodeCheck = node --version 2>&1
-$npmCheck = npm --version 2>&1
-Write-Host "✓ Node.js: $nodeCheck"
-Write-Host "✓ npm: $npmCheck"
+$npmCheck = npm.cmd --version 2>&1
+Write-Host "[v] Node.js: $nodeCheck"
+Write-Host "[v] npm: $npmCheck"
 Write-Host ""
 
-# Kiểm tra node_modules
-Write-Host "📦 Kiểm tra dependencies..."
+# Kiem tra node_modules
+Write-Host "[*] Kiem tra dependencies..."
 if (Test-Path "node_modules") {
-    Write-Host "✓ node_modules tìm thấy"
+    Write-Host "[v] node_modules tim thay"
 } else {
-    Write-Host "⚠️  node_modules không tìm thấy"
-    Write-Host "   Cài đặt: npm install"
+    Write-Host "[!] node_modules khong tim thay"
+    Write-Host "   Cai dat: npm install"
     Write-Host ""
-    Write-Host "⏳ Đang cài đặt dependencies..."
-    npm install
+    Write-Host "[*] Dang cai dat dependencies..."
+    npm.cmd install
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "❌ Lỗi cài đặt dependencies"
+        Write-Host "[x] Loi cai dat dependencies"
         exit 1
     }
 }
 Write-Host ""
 
-# Khởi động dev server
+# Khoi dong dev server
 Write-Host "======================================"
-Write-Host "✅ Khởi động Vite Dev Server"
+Write-Host "[+] Khoi dong Vite Dev Server"
 Write-Host "======================================"
 Write-Host ""
-Write-Host "🌐 Frontend URL: http://localhost:5173"
-Write-Host "📝 Đăng nhập:"
+Write-Host "Frontend URL: http://localhost:5173"
+Write-Host "Dang nhap:"
 Write-Host "   - Email:    test@test.com"
 Write-Host "   - Password: 123456"
 Write-Host ""
-Write-Host "Nhấn Ctrl+C để dừng server"
+Write-Host "Nhan Ctrl+C de dung server"
 Write-Host ""
 
-npm run dev
+npm.cmd run dev -- --host 127.0.0.1 --port 5173

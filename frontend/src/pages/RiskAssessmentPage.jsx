@@ -3,9 +3,26 @@ import api from '../api/axios'
 import PageHeader from '../components/PageHeader'
 import FeaturePageBanner from '../components/FeaturePageBanner'
 import ResultDashboard from '../components/ResultDashboard'
-import XAIChart from '../components/XAIChart'
 import { getFeatureById } from '../data/features'
 import { AGE_GROUP_LABELS } from '../data/healthFormLabels'
+
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Trang này là module tầm soát nguy cơ tim mạch/đột quỵ bằng Machine Learning.
+  Input X: 11 chỉ số sức khỏe gồm HighBP, HighChol, BMI, Smoker, Diabetes,
+  PhysActivity, Fruits, Veggies, HvyAlcoholConsump, Age và Sex.
+  Hàm xử lý f:
+  - Frontend kiểm tra dữ liệu form, đặc biệt BMI.
+  - Gửi dữ liệu đến backend /api/predict.
+  - Backend dùng RandomForestClassifier để tính xác suất nguy cơ.
+  Output y:
+  - risk_percentage: phần trăm nguy cơ.
+  - risk_level: Thấp / Trung bình / Cao.
+  - is_anomaly: có bất thường dữ liệu hay không.
+  - feature_importances: dữ liệu phục vụ XAI.
+  Khi thầy hỏi y = f(X):
+  - X là 11 chỉ số sức khỏe, f là Random Forest, y là phần trăm nguy cơ.
+*/
 
 const INITIAL_FORM = {
   HighBP: 0,
@@ -381,11 +398,11 @@ export default function RiskAssessmentPage() {
 
       {result && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto relative">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto relative">
             <button
               type="button"
               onClick={() => setResult(null)}
-              className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors z-10"
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors z-10"
               aria-label="Đóng kết quả"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -395,9 +412,6 @@ export default function RiskAssessmentPage() {
 
             <div className="p-6 sm:p-8">
               <ResultDashboard result={result} healthDataRaw={submittedForm || form} />
-              <div className="mt-8">
-                <XAIChart />
-              </div>
             </div>
           </div>
         </div>

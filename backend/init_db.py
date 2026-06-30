@@ -1,3 +1,15 @@
+﻿# GHI CHÚ VẤN ĐÁP:
+# File này khởi tạo cấu trúc database MySQL cho hệ thống.
+# Vai trò:
+# - Tạo database và các bảng cần thiết để lưu tài khoản người dùng,
+#   lịch sử tầm soát sức khỏe, lịch sử tư vấn AI và thông tin liên hệ khẩn cấp.
+# - Đây không phải module AI, nhưng là tầng lưu trữ giúp hệ thống có dữ liệu theo từng người dùng.
+# Khi thầy hỏi dữ liệu lưu ở đâu:
+# - Thông tin user nằm trong bảng users.
+# - Kết quả dự đoán nằm trong bảng health_records.
+# - Lịch sử chatbot nằm trong bảng chat_logs.
+# - Thông tin liên hệ khẩn cấp nằm trong bảng emergency_contacts.
+
 import mysql.connector
 from mysql.connector import Error
 
@@ -60,6 +72,7 @@ try:
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_logs (
           chat_id INT PRIMARY KEY AUTO_INCREMENT,
+          session_id VARCHAR(50),
           user_id INT NOT NULL,
           user_message TEXT NOT NULL,
           ai_response TEXT NOT NULL,

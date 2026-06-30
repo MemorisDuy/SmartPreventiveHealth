@@ -1,6 +1,17 @@
 import React from 'react'
 import PageHeader from '../components/PageHeader'
 
+/*
+  GHI CHÚ VẤN ĐÁP:
+  Trang này giải thích khái niệm XAI trong hệ thống.
+  Input X: các đặc trưng sức khỏe và độ quan trọng của từng đặc trưng.
+  Hàm xử lý f: dùng feature_importances_ từ Random Forest để minh bạch hóa kết quả.
+  Output y: phần giải thích trực quan cho biết yếu tố nào làm tăng hoặc giảm nguy cơ.
+  Khi thầy hỏi vì sao cần XAI:
+  - Vì y tế cần tính giải thích được; người dùng không nên chỉ nhận một con số phần trăm,
+    mà phải hiểu yếu tố nào đang ảnh hưởng đến nguy cơ.
+*/
+
 export default function XAIPage() {
   return (
     <div className="space-y-10 animate-fade-in pb-8">
