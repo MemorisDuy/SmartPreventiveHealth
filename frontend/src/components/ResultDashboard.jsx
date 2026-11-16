@@ -47,6 +47,16 @@ export default function ResultDashboard({ result, healthDataRaw }) {
       'Sex': 'Giới tính'
     }
 
+    if (result?.feature_contributions && typeof result.feature_contributions === 'object') {
+      return Object.entries(result.feature_contributions)
+        .map(([key, value]) => ({
+          name: featureNames[key] || key,
+          value: Math.round(Math.abs(value || 0) * 100 * 2), // Scale to visible range
+          type: (value || 0) >= 0 ? 'danger' : 'safe'
+        }))
+        .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+        .slice(0, 5) // Top 5 features
+    }
     if (result?.feature_importances && typeof result.feature_importances === 'object') {
       return Object.entries(result.feature_importances)
         .map(([key, value]) => ({
@@ -58,7 +68,7 @@ export default function ResultDashboard({ result, healthDataRaw }) {
         .slice(0, 5) // Top 5 features
     }
     return []
-  }, [result?.feature_importances]);
+  }, [result?.feature_contributions, result?.feature_importances]);
 
   const handleChatWithContext = () => {
     const summary = `Tôi vừa tầm soát tim mạch/đột quỵ với mức rủi ro ${calculatedRisk}% (mức ${

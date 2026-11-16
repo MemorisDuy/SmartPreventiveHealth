@@ -132,7 +132,7 @@ export default function SOSMapPage() {
         setEmailStatus({
           success: true,
           message: res.data.message || `Đã gửi Email SOS chứa vị trí của bạn tới ${emergencyEmail}!`,
-          isWarning: true
+          isWarning: Boolean(res.data?.is_mock)
         })
       } else {
         setEmailStatus({

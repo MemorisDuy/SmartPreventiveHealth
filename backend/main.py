@@ -20,7 +20,9 @@
 import os
 import sys
 import base64
+import html
 import io
+import secrets
 from PIL import Image
 import PIL.PngImagePlugin
 
@@ -34,25 +36,29 @@ if hasattr(sys.stdout, "reconfigure"):
 
 import bcrypt
 import joblib
+import jwt
 import pandas as pd
 import mysql.connector
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 import google.generativeai as genai
 import tempfile
 import uuid
 from dotenv import load_dotenv
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Load biến môi trường từ file .env
-load_dotenv()
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 # Load thêm file .env từ frontend nếu có để lấy GROQ API key
 try:
-    frontend_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", ".env")
+    frontend_env_path = os.path.join(BASE_DIR, "..", "frontend", ".env")
     if os.path.exists(frontend_env_path):
         load_dotenv(frontend_env_path)
         print(f"[INFO] Đã load bổ sung file .env từ frontend: {frontend_env_path}")
@@ -67,11 +73,15 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# Cấu hình CORS - cho phép React dev server (localhost:5173) gọi được API
+# Cấu hình CORS - hỗ trợ cấu hình qua ALLOWED_ORIGINS khi deploy
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "*").strip()
+_allowed_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+_allow_credentials = "*" not in _allowed_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Cho phép tất cả origins (có thể giới hạn sau)
-    allow_credentials=True,
+    allow_origins=_allowed_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -85,13 +95,16 @@ rf_model = None
 iso_forest = None
 
 try:
-    if os.path.exists("heart_risk_model.pkl"):
-        rf_model = joblib.load("heart_risk_model.pkl")
+    rf_model_path = os.path.join(BASE_DIR, "heart_risk_model.pkl")
+    iso_model_path = os.path.join(BASE_DIR, "anomaly_detector.pkl")
+
+    if os.path.exists(rf_model_path):
+        rf_model = joblib.load(rf_model_path)
         MODEL_LOADED = True
         print("✓ Mô hình Heart Risk Random Forest đã tải thành công!")
     
-    if os.path.exists("anomaly_detector.pkl"):
-        iso_forest = joblib.load("anomaly_detector.pkl")
+    if os.path.exists(iso_model_path):
+        iso_forest = joblib.load(iso_model_path)
         print("✓ Mô hình Anomaly Detector (Isolation Forest) đã tải thành công!")
 except Exception as e:
     print(f"✗ Lỗi load model: {e}")
@@ -108,7 +121,7 @@ class GeminiManager:
     - Hỗ trợ cả text-only và vision (multimodal)
     """
 
-    def __init__(self, api_keys: list[str], model_name: str = 'gemini-2.0-flash'):
+    def __init__(self, api_keys: list[str], model_name: str = 'gemini-2.5-flash'):
         self.api_keys = [k.strip() for k in api_keys if k.strip()]
         self.model_name = model_name
         self.current_index = 0
@@ -241,11 +254,53 @@ def _get_pool():
             pool_size=5,
             pool_reset_session=True,
             host=os.getenv("DB_HOST", "localhost"),
+            port=int(os.getenv("DB_PORT", "3306")),
             user=os.getenv("DB_USER", "root"),
             password=os.getenv("DB_PASSWORD", ""),
             database=os.getenv("DB_NAME", "healthcare_db")
         )
     return _db_pool
+
+# ============================================================================
+# JWT AUTHENTICATION HELPERS
+# ============================================================================
+JWT_SECRET = os.getenv("JWT_SECRET") or secrets.token_urlsafe(32)
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "168"))  # 7 ngày mặc định
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def create_access_token(user_id: int, email: str, full_name: str) -> str:
+    """Tạo JWT access token cho phiên đăng nhập."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "user_id": int(user_id),
+        "email": email,
+        "full_name": full_name,
+        "iat": now,
+        "exp": now + timedelta(hours=JWT_EXPIRE_HOURS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+) -> dict:
+    """Xác thực Bearer JWT token cho các endpoint cần đăng nhập."""
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Vui lòng đăng nhập lại (thiếu token xác thực).")
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return {
+            "user_id": int(payload["user_id"]),
+            "email": payload.get("email", ""),
+            "full_name": payload.get("full_name", ""),
+        }
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token xác thực không hợp lệ. Vui lòng đăng nhập lại.")
 
 def get_db_connection():
     """Lấy kết nối từ connection pool (nhanh hơn so với tạo mới mỗi lần)"""
@@ -334,14 +389,89 @@ MAX_IMAGE_BASE64_LEN = 10 * 1024 * 1024  # ~10MB encoded (hỗ trợ ảnh ~7-8M
 
 
 def require_gemini():
-    if gemini_mgr is None or not gemini_mgr.is_available:
-        groq_api_key = os.getenv("GROQ_API_KEY", "") or os.getenv("VITE_GROQ_API_KEY", "")
-        if groq_api_key:
-            return
-        raise HTTPException(
-            status_code=503,
-            detail="Gemini API chưa cấu hình. Thêm GEMINI_API_KEYS vào backend/.env và khởi động lại server.",
-        )
+    has_gemini = gemini_mgr is not None and gemini_mgr.is_available
+    has_groq = bool(os.getenv("GROQ_API_KEY", "") or os.getenv("VITE_GROQ_API_KEY", ""))
+    has_openrouter = bool(os.getenv("OPENROUTER_API_KEY", ""))
+    if has_gemini or has_groq or has_openrouter:
+        return
+    raise HTTPException(
+        status_code=503,
+        detail="Chưa cấu hình AI API key. Thêm GEMINI_API_KEYS, OPENROUTER_API_KEY hoặc GROQ_API_KEY vào backend/.env.",
+    )
+
+
+def generate_text_with_fallback(
+    prompt: str,
+    system_prompt: Optional[str] = None,
+    max_tokens: int = 2000,
+    temperature: float = 0.7,
+) -> str:
+    """Sinh văn bản AI theo thứ tự ưu tiên: Gemini -> OpenRouter -> Groq."""
+    last_err = None
+    full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+
+    # 1. Gemini
+    if gemini_mgr is not None and gemini_mgr.is_available:
+        try:
+            response = gemini_mgr.generate_content(
+                full_prompt,
+                generation_config=genai.types.GenerationConfig(
+                    max_output_tokens=max_tokens,
+                    temperature=temperature,
+                ),
+            )
+            if response and getattr(response, "text", None):
+                return response.text.strip()
+        except Exception as e:
+            last_err = e
+            print(f"[WARN] Gemini text fallback triggered: {e}")
+
+    # 2. OpenRouter
+    openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if openrouter_api_key:
+        for model_name in [
+            "google/gemma-4-31b-it:free",
+            "google/gemma-4-26b-a4b-it:free",
+            "nvidia/nemotron-3.5-lightning:free",
+        ]:
+            try:
+                reply = call_openrouter_api(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    base64_image=None,
+                    model=model_name,
+                )
+                if reply:
+                    return reply
+            except Exception as e:
+                last_err = e
+                print(f"[WARN] OpenRouter ({model_name}) failed: {e}")
+
+    # 3. Groq
+    groq_api_key = os.getenv("GROQ_API_KEY", "") or os.getenv("VITE_GROQ_API_KEY", "")
+    if groq_api_key:
+        from groq import Groq
+        groq_client = Groq(api_key=groq_api_key)
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        for groq_model in ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]:
+            try:
+                groq_response = groq_client.chat.completions.create(
+                    model=groq_model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                content = groq_response.choices[0].message.content
+                if content:
+                    return content.strip()
+            except Exception as e:
+                last_err = e
+                print(f"[WARN] Groq ({groq_model}) fallback failed: {e}")
+
+    raise last_err or RuntimeError("Tất cả nhà cung cấp AI đều không khả dụng.")
 
 
 
@@ -391,10 +521,14 @@ def register(req: RegisterRequest):
         user_id = cursor.lastrowid
 
         print(f"[INFO] User mới đã đăng ký: {req.email} (ID: {user_id})")
+        token = create_access_token(user_id=user_id, email=req.email, full_name=req.full_name)
 
         return {
             "success": True,
             "user_id": user_id,
+            "full_name": req.full_name,
+            "access_token": token,
+            "token_type": "bearer",
             "message": "Đăng ký thành công! Vui lòng đăng nhập."
         }
 
@@ -481,11 +615,14 @@ async def login(req: LoginRequest):
             print(f"[WARN] Re-hash failed: {rehash_err}")
 
         print(f"[INFO] Login OK: {req.email} (ID: {user['user_id']}) | DB: {(t2-t1)*1000:.0f}ms | bcrypt: {(t3-t2)*1000:.0f}ms | total: {(time.perf_counter()-t0)*1000:.0f}ms")
+        token = create_access_token(user_id=user["user_id"], email=req.email, full_name=user["full_name"])
 
         return {
             "success": True,
             "user_id": user["user_id"],
             "full_name": user["full_name"],
+            "access_token": token,
+            "token_type": "bearer",
             "message": "Đăng nhập thành công!"
         }
 
@@ -502,8 +639,32 @@ async def login(req: LoginRequest):
 # ============================================================================
 # ENDPOINT: POST /api/predict - Dự đoán rủi ro Tim mạch & Đột quỵ
 # ============================================================================
+def compute_feature_contributions(importances: dict, req: PredictRequest) -> dict:
+    """
+    Tính đóng góp XAI theo từng bệnh nhân (kết hợp độ quan trọng của Random Forest
+    với chiều hướng thực tế của từng chỉ số: >0 tăng nguy cơ, <0 bảo vệ/giảm nguy cơ).
+    """
+    signs = {
+        "HighBP": 1 if req.HighBP == 1 else -1,
+        "HighChol": 1 if req.HighChol == 1 else -1,
+        "BMI": 1 if (req.BMI >= 25 or req.BMI < 18.5) else -1,
+        "Smoker": 1 if req.Smoker == 1 else -1,
+        "Diabetes": 1 if req.Diabetes >= 1 else -1,
+        "PhysActivity": -1 if req.PhysActivity == 1 else 1,
+        "Fruits": -1 if req.Fruits == 1 else 1,
+        "Veggies": -1 if req.Veggies == 1 else 1,
+        "HvyAlcoholConsump": 1 if req.HvyAlcoholConsump == 1 else -1,
+        "Age": 1 if req.Age >= 8 else -1,
+        "Sex": 1 if req.Sex == 1 else -0.5,
+    }
+    return {
+        name: round(float(imp) * signs.get(name, 1), 6)
+        for name, imp in importances.items()
+    }
+
+
 @app.post("/api/predict")
-def predict_risk(req: PredictRequest):
+def predict_risk(req: PredictRequest, current_user: dict = Depends(get_current_user)):
     """
     Dự đoán rủi ro Tim mạch & Đột quỵ
     - Load model từ .pkl file
@@ -511,6 +672,9 @@ def predict_risk(req: PredictRequest):
     - Lưu kết quả vào health_records
     - Phân loại risk level: Thấp (<30%), Trung bình (30-60%), Cao (>60%)
     """
+    if req.user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Không có quyền thực hiện dự đoán cho người dùng khác.")
+
     if not MODEL_LOADED:
         raise HTTPException(status_code=500, detail="AI Model chưa sẵn sàng. Vui lòng chạy train_model.py trước!")
 
@@ -571,8 +735,9 @@ def predict_risk(req: PredictRequest):
         cursor.execute(sql, values)
         conn.commit()
 
-        # Feature Importance for XAI
+        # Feature Importance & per-patient Contributions for XAI
         importances = {}
+        contributions = {}
         if rf_model is not None:
             feature_names = [
                 'HighBP', 'HighChol', 'BMI', 'Smoker', 'Diabetes', 'PhysActivity', 
@@ -580,6 +745,7 @@ def predict_risk(req: PredictRequest):
             ]
             for i, name in enumerate(feature_names):
                 importances[name] = float(rf_model.feature_importances_[i])
+            contributions = compute_feature_contributions(importances, req)
 
         print(f"[INFO] Health record saved - User {req.user_id}: Risk {risk_prob:.2f}% ({risk_level})")
 
@@ -589,6 +755,7 @@ def predict_risk(req: PredictRequest):
             "is_anomaly": is_anomaly,
             "message": message,
             "feature_importances": importances,
+            "feature_contributions": contributions,
             "inputs": {
                 "HighBP": req.HighBP,
                 "HighChol": req.HighChol,
@@ -618,9 +785,7 @@ def predict_risk(req: PredictRequest):
 # ============================================================================
 @app.post("/api/health-advice")
 def health_advice(req: HealthAdviceRequest):
-    """Tạo 3 gạch đầu dòng lời khuyên từ Gemini (proxy an toàn cho frontend)."""
-    require_gemini()
-
+    """Tạo 3 gạch đầu dòng lời khuyên từ AI (Gemini -> OpenRouter -> Groq -> dự phòng)."""
     system_prompt = (
         "Bạn là một bác sĩ tim mạch giàu kinh nghiệm. Hãy đưa ra chính xác 3 gạch đầu dòng "
         "lời khuyên hành động ngắn gọn, thiết thực, ấm áp bằng tiếng Việt dựa vào dữ liệu sức khỏe "
@@ -632,63 +797,35 @@ def health_advice(req: HealthAdviceRequest):
     )
 
     try:
-        full_prompt = f"{system_prompt}\n\n{user_prompt}"
-        response = gemini_mgr.generate_content(full_prompt, generation_config=genai.types.GenerationConfig(
-            max_output_tokens=300,
+        advice = generate_text_with_fallback(
+            prompt=user_prompt,
+            system_prompt=system_prompt,
+            max_tokens=300,
             temperature=0.7,
-        ))
-        advice = response.text
+        )
         return {"advice": advice}
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"[ERROR] Health advice error: {e}")
-        
-        # Thử fallback qua Groq
-        groq_api_key = os.getenv("GROQ_API_KEY", "") or os.getenv("VITE_GROQ_API_KEY", "")
-        if groq_api_key:
-            try:
-                print("[FALLBACK] Đang thử gọi Groq API cho health-advice...")
-                from groq import Groq
-                groq_client = Groq(api_key=groq_api_key)
-                groq_response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=300
-                )
-                advice = groq_response.choices[0].message.content.strip()
-                print("✓ Gọi Groq API thành công cho health-advice!")
-                return {"advice": advice}
-            except Exception as groq_err:
-                print(f"❌ Gọi Groq API cho health-advice thất bại: {groq_err}")
-
-        if is_quota_error(e):
-            print("[QUOTA] Phát hiện lỗi giới hạn hạn ngạch Gemini. Sử dụng lời khuyên sức khỏe dự phòng.")
-            risk = req.risk_percentage
-            if risk >= 60:
-                advice = (
-                    "• Hạn chế tối đa các thực phẩm nhiều muối, mỡ động vật và đồ ăn chế biến sẵn.\n"
-                    "• Đo huyết áp và nhịp tim hàng ngày, uống thuốc đúng giờ theo chỉ định của bác sĩ.\n"
-                    "• Tránh làm việc quá sức, giữ tinh thần thoải mái và liên hệ ngay cơ sở y tế khi có dấu hiệu bất thường."
-                )
-            elif risk >= 30:
-                advice = (
-                    "• Tăng cường ăn rau xanh, trái cây tươi và các loại ngũ cốc nguyên hạt hàng ngày.\n"
-                    "• Dành ít nhất 30 phút mỗi ngày để đi bộ nhẹ nhàng hoặc tập thể dục vừa sức.\n"
-                    "• Kiểm tra sức khỏe định kỳ mỗi 6 tháng để theo dõi sát sao các chỉ số tim mạch."
-                )
-            else:
-                advice = (
-                    "• Duy trì chế độ ăn uống cân bằng, uống đủ nước và ngủ đủ giấc từ 7-8 tiếng mỗi đêm.\n"
-                    "• Tập thể dục đều đặn ít nhất 5 ngày mỗi tuần để duy trì độ dẻo dai cho tim mạch.\n"
-                    "• Tránh xa khói thuốc lá và hạn chế tối đa việc sử dụng đồ uống có cồn."
-                )
-            return {"advice": advice}
-        raise HTTPException(status_code=500, detail=f"Lỗi Gemini: {str(e)}")
+        print(f"[WARN] Health advice AI fallback to static: {e}")
+        risk = req.risk_percentage
+        if risk >= 60:
+            advice = (
+                "• Hạn chế tối đa các thực phẩm nhiều muối, mỡ động vật và đồ ăn chế biến sẵn.\n"
+                "• Đo huyết áp và nhịp tim hàng ngày, uống thuốc đúng giờ theo chỉ định của bác sĩ.\n"
+                "• Tránh làm việc quá sức, giữ tinh thần thoải mái và liên hệ ngay cơ sở y tế khi có dấu hiệu bất thường."
+            )
+        elif risk >= 30:
+            advice = (
+                "• Tăng cường ăn rau xanh, trái cây tươi và các loại ngũ cốc nguyên hạt hàng ngày.\n"
+                "• Dành ít nhất 30 phút mỗi ngày để đi bộ nhẹ nhàng hoặc tập thể dục vừa sức.\n"
+                "• Kiểm tra sức khỏe định kỳ mỗi 6 tháng để theo dõi sát sao các chỉ số tim mạch."
+            )
+        else:
+            advice = (
+                "• Duy trì chế độ ăn uống cân bằng, uống đủ nước và ngủ đủ giấc từ 7-8 tiếng mỗi đêm.\n"
+                "• Tập thể dục đều đặn ít nhất 5 ngày mỗi tuần để duy trì độ dẻo dai cho tim mạch.\n"
+                "• Tránh xa khói thuốc lá và hạn chế tối đa việc sử dụng đồ uống có cồn."
+            )
+        return {"advice": advice}
 
 # ============================================================================
 # ENDPOINT: POST /api/analyze-meal - Phân tích bữa ăn (text + ảnh)
@@ -823,10 +960,8 @@ def analyze_meal(req: MealRequest):
             "- Có thể kết hợp luộc cùng các loại nấm tươi để tăng thêm hương vị và bổ sung chất đạm thực vật lành tính."
         )
 
-    if mock_reply:
+    if mock_reply and os.getenv("ENABLE_DEMO_MOCK", "false").lower() == "true":
         print(f"[DEMO MODE] Phát hiện món ăn demo '{mock_food_type}' qua từ khóa mô tả hoặc tên ảnh.")
-        print(f"[DEMO MODE] Mô phỏng thời gian phân tích AI trong 5 giây...")
-        time.sleep(5.0)
         return {
             "reply": mock_reply,
             "has_image": has_image,
@@ -873,7 +1008,7 @@ def analyze_meal(req: MealRequest):
             # Danh sách các model Vision miễn phí của OpenRouter để tự động fallback khi bị rate limit (429) hoặc bận (503/504)
             vision_models = [
                 'google/gemma-4-31b-it:free',
-                'nvidia/nemotron-nano-12b-v2-vl:free',
+                'nvidia/nemotron-3.5-super-vl:free',
                 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'
             ]
 
@@ -893,42 +1028,30 @@ def analyze_meal(req: MealRequest):
                     print(f"[WARN] Lỗi khi gọi model vision {model_name}: {model_err}")
                     last_err = model_err
 
+            if not reply and gemini_mgr is not None and gemini_mgr.is_available:
+                try:
+                    missing_padding = len(base64_data) % 4
+                    padded_b64 = base64_data + ("=" * (4 - missing_padding) if missing_padding else "")
+                    img = Image.open(io.BytesIO(base64.b64decode(padded_b64)))
+                    gem_res = gemini_mgr.generate_content([prompt_text, img])
+                    if gem_res and getattr(gem_res, "text", None):
+                        reply = gem_res.text.strip()
+                except Exception as gem_err:
+                    last_err = gem_err
+
             if not reply:
                 if last_err:
                     raise last_err
-                raise ValueError("Tất cả các model Vision miễn phí đều thất bại.")
+                raise ValueError("Tất cả các model Vision đều thất bại.")
 
         else:
-            # Danh sách các model Text miễn phí của OpenRouter để fallback
-            text_models = [
-                'meta-llama/llama-3.3-70b-instruct:free',
-                'google/gemma-4-31b-it:free',
-                'nousresearch/hermes-3-llama-3.1-405b:free',
-                'qwen/qwen3-next-80b-a3b-instruct:free'
-            ]
-            
             user_text = f"Phân tích bữa ăn sau và đánh giá tác động tim mạch/cholesterol: {description}"
-
-            for model_name in text_models:
-                try:
-                    print(f"[INFO] Đang thử phân tích dinh dưỡng (văn bản) bằng model: {model_name}...")
-                    reply = call_openrouter_api(
-                        prompt=user_text,
-                        system_prompt=system_prompt,
-                        base64_image=None,
-                        model=model_name
-                    )
-                    if reply:
-                        print(f"✓ Phân tích văn bản thành công bằng model: {model_name}")
-                        break
-                except Exception as model_err:
-                    print(f"[WARN] Lỗi khi gọi model text {model_name}: {model_err}")
-                    last_err = model_err
-
-            if not reply:
-                if last_err:
-                    raise last_err
-                raise ValueError("Tất cả các model Text miễn phí đều thất bại.")
+            reply = generate_text_with_fallback(
+                prompt=user_text,
+                system_prompt=system_prompt,
+                max_tokens=2000,
+                temperature=0.7,
+            )
 
         return {
             "reply": reply,
@@ -953,6 +1076,9 @@ def send_automatic_alert_email(receiver_email: str, alert_type: str, image_base6
     from email.mime.text import MIMEText
     from email.mime.multipart import MIMEMultipart
 
+    safe_alert_type = html.escape(alert_type or "Sự cố khẩn cấp")
+    safe_advice = html.escape(advice or "")
+
     # Tạo HTML cho email cảnh báo
     html_content = f"""
     <!DOCTYPE html>
@@ -976,7 +1102,7 @@ def send_automatic_alert_email(receiver_email: str, alert_type: str, image_base6
                 
                 <div style="background-color: #fff1f2; border-left: 4px solid #f43f5e; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
                     <p style="margin: 0; font-size: 15px; color: #9f1239; font-weight: bold;">
-                        🚨 PHÁT HIỆN SỰ CỐ: {alert_type.upper()}
+                        🚨 PHÁT HIỆN SỰ CỐ: {safe_alert_type.upper()}
                     </p>
                     <p style="margin: 6px 0 0 0; font-size: 13px; color: #be123c; line-height: 1.5;">
                         Hệ thống Edge AI y tế trong phòng giám sát vừa ghi nhận sự cố bất thường của bệnh nhân vào lúc {datetime.now().strftime('%d/%m/%Y - %H:%M:%S')}.
@@ -993,7 +1119,7 @@ def send_automatic_alert_email(receiver_email: str, alert_type: str, image_base6
                 <div style="margin-bottom: 20px; background-color: #f8fafc; padding: 16px; border-radius: 12px; border: 1px solid #e2e8f0;">
                     <h3 style="color: #9f1239; font-size: 14px; margin: 0 0 8px 0; text-transform: uppercase; font-weight: 800;">🚑 Lời khuyên sơ cứu nhanh từ Bác Sĩ AI:</h3>
                     <div style="font-size: 13px; line-height: 1.6; color: #334155; white-space: pre-wrap;">
-{advice}
+{safe_advice}
                     </div>
                 </div>
 
@@ -1139,122 +1265,88 @@ def call_openrouter_api(prompt: str, system_prompt: str = None, base64_image: st
 
 @app.post("/api/emergency-alert")
 async def handle_emergency_alert(request: EmergencyRequest):
+    raw_base64_data = (request.image_base64 or "").strip()
+    base64_data = raw_base64_data.split(",", 1)[1] if "," in raw_base64_data else raw_base64_data
+    prompt = (
+        f"Đây là hình ảnh bệnh nhân được camera giám sát chụp lại khi phát hiện dấu hiệu {request.alert_type}. "
+        f"Bạn là bác sĩ cấp cứu. Dựa vào tư thế trong ảnh, hãy đưa ra 3 bước sơ cứu khẩn cấp ngắn gọn nhất. "
+        f"Không cần giải thích thêm."
+    )
+
+    # Giải mã và kiểm tra ảnh hợp lệ trước khi gọi Vision AI
     try:
-        raw_base64_data = request.image_base64
-        base64_data = raw_base64_data
-        
-        # 1. BẮT BUỘC: Xử lý tiền tố của chuỗi Base64
-        if "," in base64_data:
-            base64_data = base64_data.split(",")[1]
-            
-        # Sửa lỗi 500: Thêm padding Base64 nếu bị khuyết
         missing_padding = len(base64_data) % 4
         if missing_padding:
             base64_data += "=" * (4 - missing_padding)
-            
-        # 2. Giải mã và chuyển thành ảnh PIL cho Gemini
         image_bytes = base64.b64decode(base64_data)
         img = Image.open(io.BytesIO(image_bytes))
-        
-        # 3. Gọi Gemini Vision (dùng GeminiManager - auto fallback key)
-        prompt = f"Đây là hình ảnh bệnh nhân được camera giám sát chụp lại khi phát hiện dấu hiệu {request.alert_type}. Bạn là bác sĩ cấp cứu. Dựa vào tư thế trong ảnh, hãy đưa ra 3 bước sơ cứu khẩn cấp ngắn gọn nhất. Không cần giải thích thêm."
-        
-        response = gemini_mgr.generate_content([prompt, img])
-        
+    except Exception as img_err:
+        raise HTTPException(status_code=400, detail=f"Ảnh base64 không hợp lệ: {img_err}")
+
+    advice = None
+    last_err = None
+
+    # 1. Thử Gemini Vision nếu đã cấu hình
+    if gemini_mgr is not None and gemini_mgr.is_available:
         try:
-            advice = response.text
-        except ValueError:
-            # Bị block do bộ lọc an toàn của Gemini
-            advice = "Hình ảnh hoặc yêu cầu bị Gemini AI chặn (Safety Filter). Vui lòng gọi ngay 115 để được hướng dẫn sơ cứu khẩn cấp."
-        
-        # 4. Gửi email cảnh báo nếu có email liên hệ
-        email_message = None
-        if request.contact_email:
+            response = gemini_mgr.generate_content([prompt, img])
             try:
-                email_res = send_automatic_alert_email(
-                    receiver_email=request.contact_email,
-                    alert_type=request.alert_type,
-                    image_base64=base64_data,
-                    advice=advice
-                )
-                email_message = email_res.get("message")
-            except Exception as email_err:
-                print(f"❌ LỖI GỬI EMAIL CẢNH BÁO TỰ ĐỘNG: {email_err}")
-                email_message = f"Không thể gửi email: {str(email_err)}"
+                advice = response.text
+            except ValueError:
+                advice = "Hình ảnh hoặc yêu cầu bị Gemini AI chặn (Safety Filter). Vui lòng gọi ngay 115 để được hướng dẫn sơ cứu khẩn cấp."
+        except Exception as e:
+            last_err = e
+            print(f"❌ LỖI GEMINI API (/api/emergency-alert): {e}")
 
-        return {
-            "emergency_advice": advice,
-            "email_sent": bool(request.contact_email),
-            "email_message": email_message
-        }
-        
-    except Exception as e:
-        print(f"❌ LỖI GEMINI API: {str(e)}")
-        
-        # Thử fallback qua OpenRouter (Hỗ trợ Vision thực tế)
-        openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "")
-        if openrouter_api_key:
-            try:
-                print("[FALLBACK] Đang thử gọi OpenRouter API cho /api/emergency-alert...")
-                advice = call_openrouter_api(
-                    prompt=prompt,
-                    system_prompt=None,
-                    base64_image=base64_data,
-                    model='google/gemma-4-31b-it:free'
-                )
-                print("✓ Gọi OpenRouter API thành công cho khẩn cấp!")
-                
-                # Gửi email cảnh báo
-                email_message = None
-                if request.contact_email:
-                    try:
-                        email_res = send_automatic_alert_email(
-                            receiver_email=request.contact_email,
-                            alert_type=request.alert_type,
-                            image_base64=base64_data,
-                            advice=advice
-                        )
-                        email_message = email_res.get("message")
-                    except Exception as email_err:
-                        print(f"❌ LỖI GỬI EMAIL CẢNH BÁO TỰ ĐỘNG (OPENROUTER FALLBACK): {email_err}")
-                        email_message = f"Không thể gửi email: {str(email_err)}"
-                
-                return {
-                    "emergency_advice": advice,
-                    "email_sent": bool(request.contact_email),
-                    "email_message": email_message
-                }
-            except Exception as or_err:
-                print(f"❌ Gọi OpenRouter API cho khẩn cấp thất bại: {or_err}")
+    # 2. Fallback qua OpenRouter Vision
+    if not advice and os.getenv("OPENROUTER_API_KEY", ""):
+        try:
+            print("[FALLBACK] Đang thử gọi OpenRouter API cho /api/emergency-alert...")
+            advice = call_openrouter_api(
+                prompt=prompt,
+                system_prompt=None,
+                base64_image=base64_data,
+                model='google/gemma-4-31b-it:free'
+            )
+            print("✓ Gọi OpenRouter API thành công cho khẩn cấp!")
+        except Exception as or_err:
+            last_err = or_err
+            print(f"❌ Gọi OpenRouter API cho khẩn cấp thất bại: {or_err}")
 
-        if is_quota_error(e):
-            print("[QUOTA] Phát hiện lỗi giới hạn hạn ngạch Gemini. Sử dụng lời khuyên dự phòng (Fallback Advice).")
-            # Xác định loại cảnh báo để lấy lời khuyên dự phòng phù hợp
-            alert_type_key = "Fall Detection" if "fall" in request.alert_type.lower() else "Face Asymmetry"
-            advice = FALLBACK_ADVICE_FAST.get(alert_type_key, "1. Gọi ngay 115 để được hướng dẫn y tế.\n2. Giữ bệnh nhân nằm yên, theo dõi nhịp thở và ý thức.\n3. Không tự ý cho ăn uống hay uống thuốc.")
-            
-            # Gửi email cảnh báo dự phòng nếu có email liên hệ
-            email_message = None
-            if request.contact_email:
-                try:
-                    email_res = send_automatic_alert_email(
-                        receiver_email=request.contact_email,
-                        alert_type=request.alert_type,
-                        image_base64=base64_data,
-                        advice=advice
-                    )
-                    email_message = email_res.get("message")
-                except Exception as email_err:
-                    print(f"❌ LỖI GỬI EMAIL CẢNH BÁO TỰ ĐỘNG (FALLBACK): {email_err}")
-                    email_message = f"Không thể gửi email: {str(email_err)}"
-            
-            return {
-                "emergency_advice": advice,
-                "email_sent": bool(request.contact_email),
-                "email_message": email_message
-            }
-        # Trả về 500 nhưng kèm thông điệp rõ ràng để dễ debug
-        raise HTTPException(status_code=500, detail=str(e))
+    # 3. Fallback lâm sàng dự phòng nếu AI không khả dụng hoặc hết quota
+    if not advice:
+        print(f"[FALLBACK] Sử dụng lời khuyên sơ cứu dự phòng cho /api/emergency-alert ({last_err})")
+        alert_type_key = "Fall Detection" if "fall" in request.alert_type.lower() else "Face Asymmetry"
+        advice = FALLBACK_ADVICE_FAST.get(
+            alert_type_key,
+            "1. Gọi ngay 115 để được hướng dẫn y tế.\n2. Giữ bệnh nhân nằm yên, theo dõi nhịp thở và ý thức.\n3. Không tự ý cho ăn uống hay uống thuốc."
+        )
+
+    # 4. Gửi email cảnh báo nếu có email liên hệ
+    email_sent = False
+    email_is_mock = False
+    email_message = None
+    if request.contact_email:
+        try:
+            email_res = send_automatic_alert_email(
+                receiver_email=request.contact_email,
+                alert_type=request.alert_type,
+                image_base64=base64_data,
+                advice=advice
+            )
+            email_is_mock = bool(email_res.get("is_mock", False))
+            email_sent = bool(email_res.get("success")) and not email_is_mock
+            email_message = email_res.get("message")
+        except Exception as email_err:
+            print(f"❌ LỖI GỬI EMAIL CẢNH BÁO TỰ ĐỘNG: {email_err}")
+            email_message = f"Không thể gửi email: {str(email_err)}"
+
+    return {
+        "emergency_advice": advice,
+        "email_sent": email_sent,
+        "email_is_mock": email_is_mock,
+        "email_message": email_message
+    }
 
 
 # ============================================================================
@@ -1262,79 +1354,43 @@ async def handle_emergency_alert(request: EmergencyRequest):
 # ============================================================================
 @app.post("/api/heart-rate-advice")
 async def heart_rate_advice(request: HeartRateAdviceRequest):
+    bpm = request.bpm
+    duration = request.duration_seconds
+
+    if bpm >= 140:
+        severity = "nguy hiểm nghiêm trọng (SVT/VT - nhịp nhanh thất)"
+    elif bpm >= 120:
+        severity = "nguy hiểm (Tachycardia nặng)"
+    else:
+        severity = "cảnh báo (Tachycardia nhẹ)"
+
+    duration_text = f", duy trì liên tục {duration} giây" if duration else ""
+    prompt = (
+        f"Bạn là bác sĩ tim mạch cấp cứu. Bệnh nhân vừa được hệ thống AI phát hiện nhịp tim "
+        f"{bpm} BPM{duration_text} — mức {severity}. "
+        f"Hãy đưa ra đúng 3 bước sơ cứu ngắn gọn nhất, mỗi bước 1 dòng, "
+        f"bắt đầu bằng số thứ tự. Không giải thích thêm, không tiêu đề."
+    )
+
     try:
-        bpm = request.bpm
-        duration = request.duration_seconds
-
-        # Phân loại mức độ
-        if bpm >= 140:
-            severity = "nguy hiểm nghiêm trọng (SVT/VT - nhịp nhanh thất)"
-        elif bpm >= 120:
-            severity = "nguy hiểm (Tachycardia nặng)"
-        else:
-            severity = "cảnh báo (Tachycardia nhẹ)"
-
-        duration_text = f", duy trì liên tục {duration} giây" if duration else ""
-
-        prompt = (
-            f"Bạn là bác sĩ tim mạch cấp cứu. Bệnh nhân vừa được hệ thống AI phát hiện nhịp tim "
-            f"{bpm} BPM{duration_text} — mức {severity}. "
-            f"Hãy đưa ra đúng 3 bước sơ cứu ngắn gọn nhất, mỗi bước 1 dòng, "
-            f"bắt đầu bằng số thứ tự. Không giải thích thêm, không tiêu đề."
-        )
-
-        response = gemini_mgr.generate_content(prompt)
-
-        try:
-            advice = response.text.strip()
-        except ValueError:
-            advice = "Gọi ngay 115. Để bệnh nhân nghỉ ngơi, không vận động. Theo dõi ý thức đến khi có y tế."
-
+        advice = generate_text_with_fallback(prompt=prompt, max_tokens=300, temperature=0.7)
         return {
             "bpm": bpm,
             "severity": severity,
             "advice": advice
         }
-
     except Exception as e:
-        print(f"[heart-rate-advice] Lỗi: {e}")
-        
-        # Thử fallback qua Groq
-        groq_api_key = os.getenv("GROQ_API_KEY", "") or os.getenv("VITE_GROQ_API_KEY", "")
-        if groq_api_key:
-            try:
-                print("[FALLBACK] Đang thử gọi Groq API cho heart-rate-advice...")
-                from groq import Groq
-                groq_client = Groq(api_key=groq_api_key)
-                groq_response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=300
-                )
-                advice = groq_response.choices[0].message.content.strip()
-                print("✓ Gọi Groq API thành công cho heart-rate-advice!")
-                return {
-                    "bpm": bpm,
-                    "severity": severity,
-                    "advice": advice
-                }
-            except Exception as groq_err:
-                print(f"❌ Gọi Groq API cho heart-rate-advice thất bại: {groq_err}")
-
-        if is_quota_error(e):
-            print("[QUOTA] Phát hiện lỗi giới hạn hạn ngạch Gemini. Sử dụng lời khuyên nhịp tim dự phòng.")
-            bpm_val = request.bpm
-            sev_key = "danger" if bpm_val >= 120 else "warning"
-            advice = FALLBACK_ADVICE_HR.get(sev_key, "1. Để bệnh nhân nằm nghỉ ngơi.\n2. Theo dõi nhịp tim.\n3. Gọi cấp cứu 115 nếu có triệu chứng nặng.")
-            return {
-                "bpm": bpm_val,
-                "severity": "nguy hiểm" if bpm_val >= 120 else "cảnh báo",
-                "advice": advice
-            }
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[heart-rate-advice] Fallback tĩnh do lỗi AI: {e}")
+        sev_key = "danger" if bpm >= 120 else "warning"
+        advice = FALLBACK_ADVICE_HR.get(
+            sev_key,
+            "1. Để bệnh nhân nằm nghỉ ngơi.\n2. Theo dõi nhịp tim.\n3. Gọi cấp cứu 115 nếu có triệu chứng nặng."
+        )
+        return {
+            "bpm": bpm,
+            "severity": severity,
+            "advice": advice
+        }
 
 
 # ============================================================================
@@ -1363,14 +1419,17 @@ def send_emergency_email(req: EmergencyEmailRequest):
                 cursor.close()
                 conn.close()
 
-    # Generate HTML content
+    # Generate HTML content (escape dữ liệu người dùng tránh HTML injection)
     hospitals_li = ""
     for idx, h in enumerate(req.hospitals or []):
+        h_name = html.escape(str(h.get('name', 'Bệnh viện')))
+        h_phone = html.escape(str(h.get('phone', '')))
+        h_dist = float(h.get('distance', 0) or 0)
         hospitals_li += f"""
         <li style="margin-bottom: 8px; font-size: 14px; color: #334155;">
-            <strong>{idx+1}. {h.get('name', 'Bệnh viện')}</strong>: 
-            Cách {h.get('distance', 0):.2f} km. 
-            <a href="tel:{h.get('phone', '')}" style="color: #ef4444; font-weight: bold; text-decoration: none;">📞 Gọi: {h.get('phone', '')}</a>
+            <strong>{idx+1}. {h_name}</strong>: 
+            Cách {h_dist:.2f} km. 
+            <a href="tel:{h_phone}" style="color: #ef4444; font-weight: bold; text-decoration: none;">📞 Gọi: {h_phone}</a>
         </li>
         """
     if not hospitals_li:
@@ -1378,7 +1437,8 @@ def send_emergency_email(req: EmergencyEmailRequest):
 
     user_info_html = ""
     if user_name:
-        user_info_html = f"<p style='margin: 4px 0; font-size: 15px;'><strong>Tên bệnh nhân:</strong> {user_name}</p>"
+        user_info_html = f"<p style='margin: 4px 0; font-size: 15px;'><strong>Tên bệnh nhân:</strong> {html.escape(str(user_name))}</p>"
+    safe_address = html.escape(str(req.address or 'Không rõ địa chỉ cụ thể'))
 
     html_content = f"""
     <!DOCTYPE html>
@@ -1408,7 +1468,7 @@ def send_emergency_email(req: EmergencyEmailRequest):
                     {user_info_html}
                     <p style="margin: 4px 0; font-size: 15px;"><strong>Thời gian:</strong> {datetime.now().strftime('%d/%m/%Y - %H:%M:%S')}</p>
                     <p style="margin: 4px 0; font-size: 15px;"><strong>Tọa độ GPS:</strong> {req.latitude:.5f}° N, {req.longitude:.5f}° E</p>
-                    <p style="margin: 4px 0; font-size: 15px;"><strong>Địa chỉ định vị:</strong> <span style="color: #0f172a; font-weight: bold;">{req.address or 'Không rõ địa chỉ cụ thể'}</span></p>
+                    <p style="margin: 4px 0; font-size: 15px;"><strong>Địa chỉ định vị:</strong> <span style="color: #0f172a; font-weight: bold;">{safe_address}</span></p>
                 </div>
                 
                 <div style="text-align: center; margin: 28px 0;">
@@ -1556,28 +1616,30 @@ def test_email(req: TestEmailRequest):
 # ENDPOINT: POST /api/chat - Chat với Bác sĩ AI (Gemini)
 # ============================================================================
 @app.post("/api/chat")
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, current_user: dict = Depends(get_current_user)):
     """
     Chat với Bác sĩ AI
-    - Gọi Google Gemini API
+    - Gọi Gemini / OpenRouter / Groq (auto-fallback)
     - System prompt: Bác sĩ AI chuyên tim mạch & dinh dưỡng
     - Lưu lịch sử vào chat_logs
     """
+    if req.user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Không có quyền truy cập phiên chat của người dùng khác.")
+
     require_gemini()
 
     if not req.message or not req.message.strip():
         raise HTTPException(status_code=400, detail="Tin nhắn không được để trống.")
 
     conn = None
+    cursor = None
     try:
-        # Xác thực dữ liệu từ Frontend
         user_id = req.user_id
         message_text = req.message.strip()
         chat_type = req.chat_type or "general"
 
         print(f"[DEBUG] Chat request - User: {user_id}, Type: {chat_type}, Message: {message_text[:100]}")
 
-        # Chọn system prompt dựa vào loại chat
         if chat_type == "diet":
             system_prompt = (
                 "Bạn là Chuyên gia Dinh dưỡng AI chuyên về tim mạch cho người Việt Nam.\n"
@@ -1594,7 +1656,7 @@ def chat(req: ChatRequest):
                 "Bạn là Bác sĩ AI gia đình chuyên về tim mạch và phòng ngừa đột quỵ cho người Việt Nam.\n"
                 "HƯỚNG DẪN:\n"
                 "- Trả lời CHI TIẾT, cụ thể và đầy đủ (5-10 câu nếu cần).\n"
-                "- Giải thích RỊ TƯỞNG cụ thể, dễ hiểu cho người bình thường.\n"
+                "- Giải thích rõ ràng, dễ hiểu cho người bình thường.\n"
                 "- Cung cấp LỜI KHUYÊN THỰC TẾ mà bệnh nhân có thể áp dụng ngay.\n"
                 "- Nếu triệu chứng nghiêm trọng, NHẮC gặp bác sĩ hoặc gọi 115.\n"
                 "- KHÔNG chẩn đoán thay bác sĩ, chỉ tư vấn phòng ngừa.\n"
@@ -1602,104 +1664,29 @@ def chat(req: ChatRequest):
                 "- CHỈ TRẢ LỜI CHI TIẾT - không kèm ghi chú hay template."
             )
 
-        # Tạo full prompt
-        full_prompt = f"{system_prompt}\n\nCâu hỏi từ bệnh nhân: {message_text}"
-        print(f"[DEBUG] Full prompt length: {len(full_prompt)} chars")
-
-        # Gọi Gemini API với xử lý lỗi chi tiết
         try:
-            print(f"[DEBUG] Calling Gemini model...")
-            response = gemini_mgr.generate_content(
-                full_prompt,
-                generation_config=genai.types.GenerationConfig(
-                    max_output_tokens=2000,
-                    temperature=0.8,
-                )
+            reply = generate_text_with_fallback(
+                prompt=message_text,
+                system_prompt=system_prompt,
+                max_tokens=2000,
+                temperature=0.8,
             )
-            print(f"[DEBUG] Gemini response received")
-
-            if not response or not response.text:
-                raise ValueError("Gemini trả về response trống")
-
-            reply = response.text
-            print(f"[DEBUG] Reply length: {len(reply)} chars")
-
-        except Exception as gemini_err:
-            error_msg = f"Lỗi gọi Gemini API: {str(gemini_err)}"
-            print(f"[ERROR] {error_msg}")
-            print(f"[ERROR] Exception type: {type(gemini_err).__name__}")
-            print(f"[ERROR] Full traceback: {gemini_err}")
-            
-            # Thử fallback qua OpenRouter (Llama 3.3 70B free model)
-            openrouter_api_key = os.getenv("OPENROUTER_API_KEY", "")
-            openrouter_success = False
-            if openrouter_api_key:
-                try:
-                    print("[FALLBACK] Đang thử gọi OpenRouter API cho /api/chat...")
-                    reply = call_openrouter_api(
-                        prompt=message_text,
-                        system_prompt=system_prompt,
-                        base64_image=None,
-                        model='meta-llama/llama-3.3-70b-instruct:free'
-                    )
-                    print("✓ Gọi OpenRouter API thành công cho /api/chat!")
-                    openrouter_success = True
-                except Exception as or_err:
-                    print(f"❌ Gọi OpenRouter API cho /api/chat thất bại: {or_err}")
-
-            if not openrouter_success:
-                # Thử fallback qua Groq
-                groq_api_key = os.getenv("GROQ_API_KEY", "") or os.getenv("VITE_GROQ_API_KEY", "")
-                if groq_api_key:
-                    try:
-                        print("[FALLBACK] Đang thử gọi Groq API cho /api/chat...")
-                        from groq import Groq
-                        groq_client = Groq(api_key=groq_api_key)
-                        groq_response = groq_client.chat.completions.create(
-                            model="llama-3.3-70b-versatile",
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": message_text}
-                            ],
-                            temperature=0.8,
-                            max_tokens=2000
-                        )
-                        reply = groq_response.choices[0].message.content.strip()
-                        print("✓ Gọi Groq API thành công cho /api/chat!")
-                    except Exception as groq_err:
-                        print(f"❌ Gọi Groq API cho /api/chat thất bại: {groq_err}")
-                        if is_quota_error(gemini_err):
-                            print("[QUOTA] Phát hiện lỗi giới hạn hạn ngạch Gemini. Trả về phản hồi chat thân thiện.")
-                            return {
-                                "reply": "Hệ thống Bác sĩ AI đang bận do vượt quá giới hạn lượt dùng thử miễn phí trong ngày (Google Gemini API Quota Exceeded). Vui lòng thử lại sau ít phút hoặc liên hệ trực tiếp với cơ sở y tế nếu bạn đang có các triệu chứng khẩn cấp.",
-                                "chat_type": chat_type,
-                                "session_id": req.session_id or str(uuid.uuid4()),
-                                "timestamp": datetime.now().isoformat(),
-                            }
-                        return JSONResponse(
-                            status_code=500,
-                            content={
-                                "detail": f"Máy chủ AI gặp lỗi: {str(gemini_err)}",
-                                "error_type": type(gemini_err).__name__
-                            }
-                        )
-            else:
-                if is_quota_error(gemini_err):
-                    print("[QUOTA] Phát hiện lỗi giới hạn hạn ngạch Gemini. Trả về phản hồi chat thân thiện.")
-                    return {
-                        "reply": "Hệ thống Bác sĩ AI đang bận do vượt quá giới hạn lượt dùng thử miễn phí trong ngày (Google Gemini API Quota Exceeded). Vui lòng thử lại sau ít phút hoặc liên hệ trực tiếp với cơ sở y tế nếu bạn đang có các triệu chứng khẩn cấp.",
-                        "chat_type": chat_type,
-                        "session_id": req.session_id or str(uuid.uuid4()),
-                        "timestamp": datetime.now().isoformat(),
-                    }
-
-                return JSONResponse(
-                    status_code=500,
-                    content={
-                        "detail": f"Máy chủ AI gặp lỗi: {str(gemini_err)}",
-                        "error_type": type(gemini_err).__name__
-                    }
-                )
+        except Exception as ai_err:
+            print(f"[ERROR] Tất cả AI provider cho /api/chat thất bại: {ai_err}")
+            if is_quota_error(ai_err):
+                return {
+                    "reply": "Hệ thống Bác sĩ AI đang bận do vượt quá giới hạn lượt dùng thử miễn phí (API Quota Exceeded). Vui lòng thử lại sau ít phút hoặc liên hệ trực tiếp với cơ sở y tế nếu bạn đang có các triệu chứng khẩn cấp.",
+                    "chat_type": chat_type,
+                    "session_id": req.session_id or str(uuid.uuid4()),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": f"Máy chủ AI tạm thời gián đoạn: {str(ai_err)}",
+                    "error_type": type(ai_err).__name__
+                }
+            )
 
         # Lưu vào database
         try:
@@ -1761,8 +1748,10 @@ def chat(req: ChatRequest):
 # ENDPOINT: GET /api/chat/sessions/{user_id} - Lấy danh sách phiên trò chuyện
 # ============================================================================
 @app.get("/api/chat/sessions/{user_id}")
-def get_chat_sessions(user_id: int, limit: int = 30):
+def get_chat_sessions(user_id: int, limit: int = 30, current_user: dict = Depends(get_current_user)):
     """Lấy danh sách phiên chat gần đây của user."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Không có quyền xem lịch sử phiên chat của người dùng khác.")
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -1796,7 +1785,7 @@ def get_chat_sessions(user_id: int, limit: int = 30):
 # ENDPOINT: GET /api/chat/session/{session_id} - Lịch sử một phiên tư vấn AI
 # ============================================================================
 @app.get("/api/chat/session/{session_id}")
-def get_chat_session_logs(session_id: str):
+def get_chat_session_logs(session_id: str, current_user: dict = Depends(get_current_user)):
     """Lấy toàn bộ tin nhắn của một phiên chat cụ thể."""
     try:
         conn = get_db_connection()
@@ -1805,10 +1794,10 @@ def get_chat_session_logs(session_id: str):
             """
             SELECT chat_id, user_message, ai_response, created_at
             FROM chat_logs
-            WHERE session_id = %s
+            WHERE session_id = %s AND user_id = %s
             ORDER BY created_at ASC
             """,
-            (session_id,),
+            (session_id, current_user["user_id"]),
         )
         rows = cursor.fetchall()
         for row in rows:
@@ -1827,8 +1816,10 @@ def get_chat_session_logs(session_id: str):
 # ENDPOINT: GET /api/chat/logs/{user_id} - Lịch sử tư vấn AI (Legacy)
 # ============================================================================
 @app.get("/api/chat/logs/{user_id}")
-def get_chat_logs(user_id: int, limit: int = 30):
+def get_chat_logs(user_id: int, limit: int = 30, current_user: dict = Depends(get_current_user)):
     """Lấy lịch sử chat gần đây của user."""
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Không có quyền xem lịch sử chat của người dùng khác.")
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -1859,12 +1850,14 @@ def get_chat_logs(user_id: int, limit: int = 30):
 # ENDPOINT: GET /api/history/{user_id} - Lấy lịch sử đo khám
 # ============================================================================
 @app.get("/api/history/{user_id}")
-def get_history(user_id: int):
+def get_history(user_id: int, current_user: dict = Depends(get_current_user)):
     """
     Lấy lịch sử đo khám của user
     - Trả về 20 bản ghi gần nhất
     - Dùng để vẽ biểu đồ lịch sử
     """
+    if user_id != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Không có quyền xem lịch sử sức khỏe của người dùng khác.")
     try:
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -1905,7 +1898,11 @@ def get_history(user_id: int):
 @app.post("/api/analyze-video-speech")
 async def analyze_video_speech(file: UploadFile = File(...)):
     """Phân tích giọng nói từ video bằng Gemini."""
-    require_gemini()
+    if gemini_mgr is None or not gemini_mgr.is_available:
+        raise HTTPException(
+            status_code=503,
+            detail="Tính năng phân tích giọng nói từ video yêu cầu GEMINI_API_KEYS trong backend/.env.",
+        )
 
     temp_filename = f"{uuid.uuid4()}.webm"
     temp_path = os.path.join(tempfile.gettempdir(), temp_filename)

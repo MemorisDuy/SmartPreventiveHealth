@@ -68,6 +68,9 @@ export default function RegisterPage() {
       })
 
       if (response.data.success) {
+        if (response.data.access_token) {
+          localStorage.setItem('access_token', response.data.access_token)
+        }
         localStorage.setItem(
           'user',
           JSON.stringify({
@@ -81,7 +84,7 @@ export default function RegisterPage() {
     } catch (err) {
       if (!err.response) {
         setError(
-          'Không kết nối được máy chủ. Hãy mở terminal backend và chạy: uvicorn main:app --reload --port 5000'
+          'Không kết nối được máy chủ. Hãy mở terminal backend và chạy: uvicorn main:app --reload --port 8000'
         )
       } else {
         setError(err.response?.data?.detail || 'Lỗi đăng ký. Vui lòng thử lại.')

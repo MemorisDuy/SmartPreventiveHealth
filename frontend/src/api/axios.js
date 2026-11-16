@@ -23,7 +23,10 @@ const api = axios.create({
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
-    // Có thể thêm Authorization token ở đây nếu cần
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
     return config
   },
   (error) => {
@@ -36,9 +39,12 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Nếu 401 Unauthorized, đăng xuất
+      // Nếu 401 Unauthorized, xóa phiên đăng nhập và chuyển về /login
       localStorage.removeItem('user')
-      window.location.href = '/login'
+      localStorage.removeItem('access_token')
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(error)
   }

@@ -31,7 +31,22 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     minify: 'terser',
-    rollupOptions: {}
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'tensorflow': [
+            '@tensorflow/tfjs-core',
+            '@tensorflow/tfjs-backend-webgl',
+            '@tensorflow/tfjs-converter',
+            '@tensorflow-models/face-landmarks-detection',
+            '@tensorflow-models/pose-detection',
+          ],
+          'charts-maps': ['recharts', 'leaflet', 'react-leaflet'],
+        },
+      },
+    },
   }
 })
 

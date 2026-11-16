@@ -10,25 +10,39 @@
 # - Lịch sử chatbot nằm trong bảng chat_logs.
 # - Thông tin liên hệ khẩn cấp nằm trong bảng emergency_contacts.
 
+import os
 import mysql.connector
 from mysql.connector import Error
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_NAME = os.getenv("DB_NAME", "healthcare_db")
+
+conn = None
+cursor = None
 
 try:
     # Kết nối tới MySQL server (không cần database)
     conn = mysql.connector.connect(
-        host='localhost',
-        user='root',
-        password=''
+        host=DB_HOST,
+        port=DB_PORT,
+        user=DB_USER,
+        password=DB_PASSWORD
     )
     
     cursor = conn.cursor()
     
-    # Tạo database
-    cursor.execute("CREATE DATABASE IF NOT EXISTS smartpreventivehealth CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-    print("✓ Database created")
+    # Tạo database (đồng bộ tên DB với main.py và init_db.sql)
+    cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+    print(f"✓ Database '{DB_NAME}' created/verified")
     
     # Sử dụng database
-    cursor.execute("USE smartpreventivehealth")
+    cursor.execute(f"USE `{DB_NAME}`")
     
     # Tạo bảng users
     cursor.execute("""
@@ -111,6 +125,7 @@ try:
 except Error as e:
     print(f"❌ Error: {e}")
 finally:
-    if conn.is_connected():
-        cursor.close()
+    if conn and conn.is_connected():
+        if cursor:
+            cursor.close()
         conn.close()

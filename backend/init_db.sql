@@ -25,6 +25,7 @@ CREATE TABLE health_records (
   Sex INT,
   risk_percentage FLOAT,
   risk_level VARCHAR(50),
+  is_anomaly TINYINT DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE,
   INDEX idx_user_date (user_id, created_at)

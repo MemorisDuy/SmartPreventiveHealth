@@ -13,49 +13,6 @@ import api from '../api/axios';
   - Đây là lời khuyên tham khảo, không phải chẩn đoán thay bác sĩ.
 */
 
-const SYSTEM_PROMPT =
-  'Bạn là một bác sĩ tim mạch giàu kinh nghiệm. Hãy đưa ra chính xác 3 gạch đầu dòng lời khuyên hành động ngắn gọn, thiết thực, ấm áp bằng tiếng Việt dựa vào dữ liệu sức khỏe của bệnh nhân. Không sử dụng markdown in đậm, in nghiêng hoặc ký tự đặc biệt.';
-
-const GROQ_MODEL = 'llama-3.3-70b-versatile';
-
-async function fetchAdviceFromGroq(apiKey, riskPercentage, healthData) {
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `Bệnh nhân có mức nguy cơ đột quỵ được máy tính báo là ${riskPercentage}%. Đây là dữ liệu y sinh cụ thể: ${JSON.stringify(healthData)}.`,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 300,
-    }),
-  });
-
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const msg =
-      data?.error?.message ||
-      data?.detail ||
-      `Groq API lỗi (${response.status})`;
-    throw new Error(msg);
-  }
-
-  if (data.choices?.[0]?.message?.content) {
-    return data.choices[0].message.content;
-  }
-
-  throw new Error('Groq không trả về nội dung');
-}
-
 async function fetchAdviceFromBackend(riskPercentage, healthData) {
   const response = await api.post('/api/health-advice', {
     risk_percentage: riskPercentage,
@@ -82,21 +39,9 @@ export default function AiAdvice({ riskPercentage, healthData }) {
     const loadAdvice = async () => {
       setIsLoading(true);
 
-      const apiKey = import.meta.env.VITE_GROQ_API_KEY;
-
       try {
-        let text = '';
-
-        if (apiKey) {
-          try {
-            text = await fetchAdviceFromGroq(apiKey, riskPercentage, healthData);
-          } catch (clientErr) {
-            console.warn('Groq client failed, trying backend:', clientErr.message);
-            text = await fetchAdviceFromBackend(riskPercentage, healthData);
-          }
-        } else {
-          text = await fetchAdviceFromBackend(riskPercentage, healthData);
-        }
+        // Luôn gọi qua backend proxy để bảo mật API key và tận dụng auto-fallback (Gemini/OpenRouter/Groq)
+        const text = await fetchAdviceFromBackend(riskPercentage, healthData);
 
         if (!controller.signal.aborted) {
           setAdvice(text);

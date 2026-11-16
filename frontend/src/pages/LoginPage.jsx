@@ -39,6 +39,9 @@ export default function LoginPage() {
       const response = await api.post('/api/login', { email, password })
 
       if (response.data.success) {
+        if (response.data.access_token) {
+          localStorage.setItem('access_token', response.data.access_token)
+        }
         localStorage.setItem(
           'user',
           JSON.stringify({
